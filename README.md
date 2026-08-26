@@ -149,7 +149,7 @@ cd blog
 
 ```bash
 # Python
-python -m http.server 8080 -d public
+python serve.py 8080
 
 # Node.js
 npx serve public

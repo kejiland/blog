@@ -67,7 +67,9 @@ function svgIcon(name, size) {
 }
 function themeIcon() { return getTheme() === 'dark' ? svgIcon('sun', 18) : svgIcon('moon', 18); }
 function refreshThemeIcon() {
-  var b = document.querySelector('#themeToggle'); if (b) b.innerHTML = themeIcon();
+  document.querySelectorAll('#themeToggle, #themeToggleSide').forEach(function (b) {
+    b.innerHTML = themeIcon();
+  });
 }
 
 function esc(s) {
@@ -139,37 +141,194 @@ function slugify(s) {
 }
 
 /* ---------- Markdown 渲染器 ---------- */
+function normalizeCodeLanguage(lang) {
+  var s = String(lang || '').trim().toLowerCase();
+  var aliases = {
+    js: 'javascript',
+    jsx: 'javascript',
+    ts: 'typescript',
+    py: 'python',
+    sh: 'bash',
+    shell: 'bash',
+    zsh: 'bash',
+    html: 'xml',
+    htm: 'xml',
+    vue: 'xml',
+    'c++': 'cpp',
+    cc: 'cpp',
+    hpp: 'cpp',
+    cs: 'csharp',
+    'c#': 'csharp',
+    yml: 'yaml',
+    rb: 'ruby',
+    rs: 'rust',
+    kt: 'kotlin'
+  };
+  return aliases[s] || s;
+}
+
 function tokenizeCode(lang, code) {
-  if (!lang || !/^(js|javascript|ts|typescript|python|py|bash|sh|css|html|json)$/i.test(lang)) {
-    return esc(code);
+  var language = normalizeCodeLanguage(lang);
+  var raw = String(code == null ? '' : code);
+
+  var keywords = {
+    javascript: 'break case catch class const continue debugger default delete do else export extends false finally for function if import in instanceof let new null return static super switch this throw true try typeof var void while with yield async await of from',
+    typescript: 'break case catch class const continue debugger default delete do else export extends false finally for function if import in instanceof let new null return static super switch this throw true try typeof var void while with yield async await interface type enum namespace implements public private protected readonly abstract keyof infer unknown never any string number boolean declare module as satisfies',
+    python: 'and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield match case',
+    java: 'abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for goto if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while true false null record sealed permits var yield',
+    c: 'auto break case char const continue default do double else enum extern float for goto if inline int long register restrict return short signed sizeof static struct switch typedef union unsigned void volatile while',
+    cpp: 'alignas alignof and and_eq asm auto bitand bitor bool break case catch char char8_t char16_t char32_t class compl concept const consteval constexpr constinit const_cast continue co_await co_return co_yield decltype default delete do double dynamic_cast else enum explicit export extern false float for friend goto if inline int long mutable namespace new noexcept not not_eq nullptr operator or or_eq private protected public reinterpret_cast requires return short signed sizeof static static_assert static_cast struct switch template this throw true try typedef typeid typename union unsigned using virtual void volatile wchar_t while xor xor_eq',
+    csharp: 'abstract as base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach goto if implicit in int interface internal is lock long namespace new null object operator out override params private protected public readonly ref return sbyte sealed short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using virtual void volatile while async await record var dynamic get set init',
+    go: 'break default func interface select case defer go map struct chan else goto package switch const fallthrough if range type continue for import return var true false nil',
+    rust: 'as break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while async await dyn',
+    bash: 'if then else elif fi for while until do done case esac function select in time coproc echo printf export cd exit return local readonly source alias unalias set unset shift getopts',
+    sql: 'select from where insert into update delete create alter drop table database index view join inner left right full outer cross on group by order having limit offset union all distinct as and or not null is in exists between like case when then else end values set primary foreign key references constraint begin commit rollback grant revoke with recursive asc desc true false',
+    json: 'true false null',
+    css: 'display position color background margin padding border width height min-width max-width min-height max-height font opacity flex grid gap top right bottom left transform transition animation overflow z-index align-items justify-content box-shadow border-radius',
+    kotlin: 'as break class continue do else false for fun if in interface is null object package return super this throw true try typealias typeof val var when while by catch constructor data enum final import inline internal open operator override private protected public sealed suspend',
+    ruby: 'BEGIN END alias and begin break case class def defined do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield',
+    yaml: 'true false null yes no on off'
+  };
+
+  var lineComments = {
+    javascript: ['//'], typescript: ['//'], java: ['//'],
+    c: ['//'], cpp: ['//'], csharp: ['//'], go: ['//'], rust: ['//'],
+    python: ['#'], bash: ['#'], ruby: ['#'], yaml: ['#'], sql: ['--']
+  };
+
+  var blockComments = {
+    javascript: [['/*', '*/']], typescript: [['/*', '*/']],
+    java: [['/*', '*/']], c: [['/*', '*/']], cpp: [['/*', '*/']],
+    csharp: [['/*', '*/']], go: [['/*', '*/']], rust: [['/*', '*/']],
+    css: [['/*', '*/']], sql: [['/*', '*/']]
+  };
+
+  var set = Object.create(null);
+  String(keywords[language] || '').split(/\s+/).forEach(function (w) {
+    if (w) set[w] = true;
+  });
+
+  function span(cls, s) {
+    return '<span class="' + cls + '">' + esc(s) + '</span>';
   }
-  lang = lang.toLowerCase();
+
+  function startsAt(pos, token) {
+    return raw.slice(pos, pos + token.length) === token;
+  }
+
+  if (language === 'xml') {
+    var htmlOut = '';
+    var hi = 0;
+    while (hi < raw.length) {
+      if (startsAt(hi, '<!--')) {
+        var hc = raw.indexOf('-->', hi + 4);
+        if (hc < 0) hc = raw.length - 3;
+        var hEnd = Math.min(raw.length, hc + 3);
+        htmlOut += span('tok-com', raw.slice(hi, hEnd));
+        hi = hEnd;
+        continue;
+      }
+      if (raw[hi] === '<') {
+        var gt = raw.indexOf('>', hi + 1);
+        if (gt < 0) gt = raw.length - 1;
+        htmlOut += span('tok-kw', raw.slice(hi, gt + 1));
+        hi = gt + 1;
+        continue;
+      }
+      htmlOut += esc(raw[hi]);
+      hi++;
+    }
+    return htmlOut;
+  }
+
   var out = '';
-  var kw = '';
-  if (lang === 'js' || lang === 'javascript' || lang === 'ts' || lang === 'typescript') {
-    kw = '\\b(?:const|let|var|function|return|if|else|for|while|class|new|import|export|from|async|await|try|catch|throw|switch|case|break|continue|typeof|instanceof|in|of|this|do|yield|delete|void|null|undefined|true|false)\\b';
-  } else if (lang === 'python' || lang === 'py') {
-    kw = '\\b(?:def|return|if|else|elif|for|while|import|from|class|try|except|finally|with|as|pass|break|continue|lambda|global|nonlocal|yield|True|False|None|not|and|or|in|is|raise|assert|del)\\b';
-  } else if (lang === 'bash' || lang === 'sh') {
-    kw = '\\b(?:if|then|else|fi|for|while|do|done|case|esac|function|echo|export|cd|exit|return|local|sudo|grep|sed|awk|curl|wget|npm|node|npx|git)\\b';
-  } else if (lang === 'css') {
-    kw = '\\b(?:display|position|color|background|margin|padding|border|width|height|font|opacity|flex|grid|z-index|top|right|bottom|left|transform|transition|@media|@keyframes)\\b';
-  } else if (lang === 'html') {
-    return esc(code);
-  } else if (lang === 'json') {
-    return esc(code);
+  var i = 0;
+
+  while (i < raw.length) {
+    var matched = false;
+
+    var blocks = blockComments[language] || [];
+    for (var bi = 0; bi < blocks.length; bi++) {
+      var open = blocks[bi][0];
+      var close = blocks[bi][1];
+      if (startsAt(i, open)) {
+        var bend = raw.indexOf(close, i + open.length);
+        if (bend < 0) bend = raw.length - close.length;
+        bend = Math.min(raw.length, bend + close.length);
+        out += span('tok-com', raw.slice(i, bend));
+        i = bend;
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+
+    var lines = lineComments[language] || [];
+    for (var li = 0; li < lines.length; li++) {
+      var lc = lines[li];
+      if (startsAt(i, lc)) {
+        var lend = raw.indexOf('\n', i + lc.length);
+        if (lend < 0) lend = raw.length;
+        out += span('tok-com', raw.slice(i, lend));
+        i = lend;
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+
+    var ch = raw[i];
+    var allowBacktick = language === 'javascript' || language === 'typescript';
+
+    if (ch === '"' || ch === "'" || (allowBacktick && ch === '`')) {
+      var quote = ch;
+      var si = i + 1;
+      var escaped = false;
+      while (si < raw.length) {
+        var sc = raw[si];
+        if (escaped) {
+          escaped = false;
+          si++;
+          continue;
+        }
+        if (sc === '\\') {
+          escaped = true;
+          si++;
+          continue;
+        }
+        si++;
+        if (sc === quote) break;
+      }
+      out += span('tok-str', raw.slice(i, si));
+      i = si;
+      continue;
+    }
+
+    if (/[0-9]/.test(ch)) {
+      var nm = raw.slice(i).match(
+        /^(?:0[xX][0-9a-fA-F]+|0[bB][01]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)[fFdDlL]?/
+      );
+      if (nm) {
+        out += span('tok-num', nm[0]);
+        i += nm[0].length;
+        continue;
+      }
+    }
+
+    if (/[A-Za-z_$]/.test(ch)) {
+      var wm = raw.slice(i).match(/^[A-Za-z_$][A-Za-z0-9_$-]*/);
+      if (wm) {
+        var word = wm[0];
+        out += set[word] ? span('tok-kw', word) : esc(word);
+        i += word.length;
+        continue;
+      }
+    }
+
+    out += esc(ch);
+    i++;
   }
-  var re = new RegExp('(' + kw + ')|(\\d+(?:\\.\\d+)?)|(\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/|#.*|<!--[\\s\\S]*?-->)|("(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\')', 'g');
-  var last = 0, m;
-  while ((m = re.exec(code)) !== null) {
-    out += esc(code.slice(last, m.index));
-    if (m[1]) out += '<span class="tok-kw">' + esc(m[1]) + '</span>';
-    else if (m[2]) out += '<span class="tok-num">' + esc(m[2]) + '</span>';
-    else if (m[3]) out += '<span class="tok-com">' + esc(m[3]) + '</span>';
-    else if (m[4]) out += '<span class="tok-str">' + esc(m[4]) + '</span>';
-    last = m.index + m[0].length;
-  }
-  out += esc(code.slice(last));
+
   return out;
 }
 
@@ -185,11 +344,11 @@ function renderMarkdown(md) {
     var line = lines[i];
 
     // 代码块
-    if (/^```/.test(line)) {
-      var lang = line.replace(/^```/, '').trim();
+    if (/^\s*```/.test(line)) {
+      var lang = line.replace(/^\s*```/, '').trim();
       var codeLines = [];
       i++;
-      while (i < lines.length && !/^```/.test(lines[i])) {
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
         codeLines.push(lines[i]);
         i++;
       }
@@ -931,6 +1090,10 @@ function app() { return document.querySelector('#app'); }
   var langSwitch = '<select id="langSwitch" class="lang-switch" onchange="window.__i18n.loadLocale(this.value).then(function(){ route(); })"></select>';
   var themeBtn = '<button class="icon-btn" id="themeToggle" aria-label="' + t('theme.toggle') + '" title="' + t('theme.toggle') + '">' + themeIcon() + '</button>';
   var searchBtn = '<button class="icon-btn search-toggle" id="searchToggle" aria-label="' + t('search.toggle') + '" title="' + t('search.toggle') + '">' + searchIconSvg() + '</button>';
+  // mobile sidebar must use unique ids
+  var sideLangSwitch = '<select id="langSwitchSide" class="lang-switch" onchange="window.__i18n.loadLocale(this.value).then(function(){ route(); })"></select>';
+  var sideSup = '<button class="icon-btn" id="themeToggleSide" aria-label="' + t('theme.toggle') + '" title="' + t('theme.toggle') + '">' + themeIcon() + '</button>';
+  var sideSearchBtn = '<button class="icon-btn search-toggle" id="searchToggleSide" aria-label="' + t('search.toggle') + '" title="' + t('search.toggle') + '">' + searchIconSvg() + '</button>';
   var hamburger = '<button class="hamburger-btn" id="hamburgerBtn" aria-label="' + t('nav.toggle') + '"><span></span><span></span><span></span></button>';
 
   // 侧边栏导航项（移动端用）
@@ -950,7 +1113,9 @@ function app() { return document.querySelector('#app'); }
     + '<button class="icon-btn sidebar-theme" id="themeToggleSide" aria-label="' + t('theme.toggle') + '" title="' + t('theme.toggle') + '">' + themeIcon() + '</button>'
     + '<button class="sidebar-close" id="sidebarClose" aria-label="' + t('search.close') + '">✕</button></div>'
     + '<nav class="sidebar-nav">' + sidebarLinks + '</nav>'
-    + '<div class="sidebar-footer"><select id="langSwitchSide" class="lang-switch" onchange="window.__i18n.loadLocale(this.value).then(function(){ route(); })"></select></div>'
+    + '<div class="sidebar-footer">'
+    + '<div class="sidebar-actions">' + sideSearchBtn + sideLangSwitch + sideSup + '</div>'
+    + '</div>'
     + '</aside>';
 
   var searchForm = '<form class="topbar-search" id="topbarSearch" role="search" onsubmit="return false">'
@@ -2575,7 +2740,6 @@ function populateLangSwitch() {
     });
   });
 }
-
 /* 返回顶部悬浮按钮：滚动超过一屏出现，点击平滑滚回当前页顶部（不跳转页面） */
 var _backTopScrollBound = false;
 function bindBackTop() {
@@ -2667,37 +2831,48 @@ function bindTocScroll() {
 
 /* 顶部导航搜索：点击搜索图标 → 隐藏导航、显示搜索框；输入实时出结果下拉面板 */
 function bindSearch() {
-  var toggle = document.querySelector('#searchToggle');
+  var toggles = document.querySelectorAll('#searchToggle, #searchToggleSide');
   var close = document.querySelector('#searchClose');
   var form = document.querySelector('#topbarSearch');
   var input = document.querySelector('#globalSearchInput');
   var panel = document.querySelector('#searchPanel');
 
-  if (toggle) toggle.addEventListener('click', function () {
+  function openSearch() {
+    var sidebar = document.querySelector('#mobileSidebar');
+    var overlay = document.querySelector('#sidebarOverlay');
+    if (sidebar) sidebar.classList.remove('open');
+    if (overlay) overlay.classList.remove('show');
+    document.body.style.overflow = '';
     var bar = document.querySelector('.topbar');
-    if (bar && bar.classList.contains('searching')) {   // 再次点击 = 收起
-      if (close) close.click();
-      return;
-    }
+    if (bar && bar.classList.contains('searching')) { if (close) close.click(); return; }
     _searchOpen = true;
     if (bar) bar.classList.add('searching');
-    if (input) { input.focus(); input.select && input.select(); }
+    if (input) { input.focus(); if (input.select) input.select(); }
+  }
+
+  toggles.forEach(function (toggle) {
+    toggle.addEventListener('click', function (e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      openSearch();
+    });
   });
-  if (close) close.addEventListener('click', function () {
+
+  if (close) close.addEventListener('click', function (e) {
+    if (e && e.stopPropagation) e.stopPropagation();
     _searchOpen = false;
     var bar = document.querySelector('.topbar');
     if (bar) bar.classList.remove('searching');
     if (input) input.value = '';
     if (panel) { panel.innerHTML = ''; panel.classList.remove('open'); }
   });
+
   if (input) {
     input.addEventListener('input', function () { renderSearchPanel(input.value); });
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { if (close) close.click(); }
-    });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape' && close) close.click(); });
   }
-  // 点击面板内部不冒泡；点击面板外部则收起整个搜索框
+  if (form) form.addEventListener('click', function (e) { e.stopPropagation(); });
   if (panel) panel.addEventListener('click', function (e) { e.stopPropagation(); });
+
   if (!_searchDocBound && typeof document !== 'undefined' && document.addEventListener) {
     _searchDocBound = true;
     document.addEventListener('click', function (e) {
@@ -2705,15 +2880,14 @@ function bindSearch() {
       if (!bar || !bar.classList.contains('searching')) return;
       var t = e.target;
       while (t && t !== document) {
-        if (t.id === 'topbarSearch' || t.id === 'searchPanel' || t.id === 'searchToggle') return;
+        if (t.id === 'topbarSearch' || t.id === 'searchPanel' || t.id === 'searchToggle' || t.id === 'searchToggleSide') return;
         t = t.parentNode;
       }
-      var c = document.querySelector('#searchClose');   // 每次重新查询，避免路由重渲染后引用失效
+      var c = document.querySelector('#searchClose');
       if (c) c.click();
     });
   }
 }
-
 /* 渲染搜索结果下拉面板（跨全部文章，非当前页过滤） */
 function renderSearchPanel(query) {
   var panel = document.querySelector('#searchPanel');

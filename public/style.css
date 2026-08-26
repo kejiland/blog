@@ -2046,19 +2046,190 @@ kbd {
   .brand { font-size: 18px; }
   .topbar-actions { gap: 6px; }
   .icon-btn { width: 30px; height: 30px; font-size: 13px; }
-  /* 精选卡片标题限制2行 */
-  .featured-card-title {
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    max-height: calc(1.5em * 2);
-  }
 }
-/* 侧栏品牌名旁边的主题切换按钮 */
-.sidebar-theme {
-  background: none;
-  border: 1px solid var(--border);
-  margin-left: auto;
-  width: 32px; height: 32px;
+
+
+/* ---------- 本地多语言代码高亮增强 ---------- */
+.code-block code[class*="lang-"] {
+  display: block;
+  color: var(--fg);
+  tab-size: 4;
+}
+.write-preview .code-block .tok-kw,
+.article .code-block .tok-kw { color: var(--tok-kw); font-weight: 600; }
+.write-preview .code-block .tok-str,
+.article .code-block .tok-str { color: var(--tok-str); }
+.write-preview .code-block .tok-com,
+.article .code-block .tok-com { color: var(--tok-com); font-style: italic; }
+.write-preview .code-block .tok-num,
+.article .code-block .tok-num { color: var(--tok-num); }
+
+/* ============================================================
+ * GitHub-like code theme
+ * 仅覆盖代码块/行内代码，不改变博客主体配色
+ * ============================================================ */
+
+:root {
+  --gh-code-bg: #f6f8fa;
+  --gh-code-fg: #1f2328;
+  --gh-code-border: #d0d7de;
+  --gh-code-inline-bg: rgba(175, 184, 193, 0.20);
+
+  --gh-syntax-keyword: #cf222e;
+  --gh-syntax-string: #0a3069;
+  --gh-syntax-comment: #6e7781;
+  --gh-syntax-number: #0550ae;
+}
+
+html[data-theme="dark"] {
+  --gh-code-bg: #161b22;
+  --gh-code-fg: #e6edf3;
+  --gh-code-border: #30363d;
+  --gh-code-inline-bg: rgba(110, 118, 129, 0.40);
+
+  --gh-syntax-keyword: #ff7b72;
+  --gh-syntax-string: #a5d6ff;
+  --gh-syntax-comment: #8b949e;
+  --gh-syntax-number: #79c0ff;
+}
+
+/* GitHub 风格代码块 */
+.article pre.code-block,
+.write-preview pre.code-block {
+  margin: 16px 0;
+  padding: 16px;
+  overflow: auto;
+
+  background: var(--gh-code-bg);
+  color: var(--gh-code-fg);
+
+  border: 1px solid var(--gh-code-border);
+  border-radius: 6px;
+
+  box-shadow: none;
+
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    "SF Mono",
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+
+  font-size: 13.6px;
+  line-height: 1.45;
+  tab-size: 4;
+  -moz-tab-size: 4;
+
+  white-space: pre;
+  word-wrap: normal;
+}
+
+/* code 本身不再重复产生背景和间距 */
+.article pre.code-block > code,
+.write-preview pre.code-block > code {
+  display: block;
+  padding: 0;
+  margin: 0;
+
+  color: inherit;
+  background: transparent;
+
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* GitHub-like syntax colors */
+.code-block .tok-kw {
+  color: var(--gh-syntax-keyword);
+  font-weight: 400;
+}
+
+.code-block .tok-str {
+  color: var(--gh-syntax-string);
+}
+
+.code-block .tok-com {
+  color: var(--gh-syntax-comment);
+  font-style: normal;
+}
+
+.code-block .tok-num {
+  color: var(--gh-syntax-number);
+}
+
+/* GitHub 风格行内代码 */
+.article code.inline-code,
+.write-preview code.inline-code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+
+  background: var(--gh-code-inline-bg);
+  color: inherit;
+
+  border: 0;
+  border-radius: 6px;
+
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    "SF Mono",
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+
+  font-size: 85%;
+  white-space: break-spaces;
+}
+
+/* GitHub 风格选择效果 */
+.article pre.code-block ::selection,
+.write-preview pre.code-block ::selection {
+  background: rgba(9, 105, 218, 0.22);
+}
+
+html[data-theme="dark"] .article pre.code-block ::selection,
+html[data-theme="dark"] .write-preview pre.code-block ::selection {
+  background: rgba(56, 139, 253, 0.32);
+}
+
+/* 更接近 GitHub 的细滚动条 */
+.article pre.code-block,
+.write-preview pre.code-block {
+  scrollbar-width: thin;
+  scrollbar-color: #8c959f transparent;
+}
+
+.article pre.code-block::-webkit-scrollbar,
+.write-preview pre.code-block::-webkit-scrollbar {
+  height: 10px;
+}
+
+.article pre.code-block::-webkit-scrollbar-track,
+.write-preview pre.code-block::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.article pre.code-block::-webkit-scrollbar-thumb,
+.write-preview pre.code-block::-webkit-scrollbar-thumb {
+  background: #afb8c1;
+  border: 3px solid var(--gh-code-bg);
+  border-radius: 10px;
+}
+
+html[data-theme="dark"] .article pre.code-block::-webkit-scrollbar-thumb,
+html[data-theme="dark"] .write-preview pre.code-block::-webkit-scrollbar-thumb {
+  background: #484f58;
+  border-color: var(--gh-code-bg);
 }

@@ -1,8 +1,22 @@
 /* ============================================================
- * Qingyu'Blog · 文章数据（由「导出 posts.js」生成）
- * 下载本文件后覆盖博客目录下的 posts.js 即可发布。
+ * Qingyu'Blog · 文章数据（本地 Python 管理端自动生成）
+ * 由 public/admin.js 通过 /local-api/posts 直接写入。
  * ============================================================ */
 window.BLOG_POSTS = [
+  {
+    "id": "测试",
+    "title": "测试",
+    "date": "2026-08-26",
+    "excerpt": "测试",
+    "content": "测试",
+    "cover": "",
+    "pinned": false,
+    "tags": [
+      "测试"
+    ],
+    "category": "测试",
+    "status": "published"
+  },
   {
     "id": "qingyu-blog-intro",
     "title": "Qingyu'Blog：一个可以双击打开的原生 JS 博客",

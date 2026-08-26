@@ -39,7 +39,14 @@
  * 常见写法：<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-xxx" data-ad-slot="xxx"></ins>
  * ============================================================ */
 window.BLOG_CONFIG = {
-  mode: 'auto',
+  mode: (
+    typeof location !== 'undefined' &&
+    (
+      location.hostname === 'localhost' ||
+      location.hostname === '127.0.0.1' ||
+      location.hostname === '[::1]'
+    )
+  ) ? 'static' : 'auto',
   apiBase: '',
   siteUrl: '',
   writeToken: '',

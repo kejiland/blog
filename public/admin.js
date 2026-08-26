@@ -80,12 +80,76 @@
   }
 
   /* ----------------------- 数据访问（兼容云端 / 静态） ----------------------- */
+  var _localWritable = null;
+
+  async function localWritable() {
+    if (cloudOn()) return false;
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') return false;
+    if (_localWritable !== null) return _localWritable;
+    try {
+      var r = await fetch('/local-api/status', { cache: 'no-store' });
+      var ct = (r.headers.get('content-type') || '').toLowerCase();
+      if (!r.ok || ct.indexOf('application/json') < 0) {
+        _localWritable = false;
+        return false;
+      }
+      var d = await r.json();
+      _localWritable = !!(d && d.writable === true);
+      return _localWritable;
+    } catch (e) {
+      _localWritable = false;
+      return false;
+    }
+  }
+
+  async function localApi(url, opts) {
+    var o = opts || {};
+    var headers = Object.assign({ 'Content-Type': 'application/json' }, o.headers || {});
+    var r = await fetch(url, Object.assign({}, o, { headers: headers, cache: 'no-store' }));
+    var ct = (r.headers.get('content-type') || '').toLowerCase();
+    var d = ct.indexOf('application/json') >= 0 ? await r.json() : null;
+    if (!r.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
+    return d || { ok: true };
+  }
+
+  function syncMemoryPost(post) {
+    if (!post || !post.id) return;
+    var arr = Array.isArray(window.BLOG_POSTS) ? window.BLOG_POSTS.slice() : [];
+    var idx = arr.findIndex(function (p) { return p && p.id === post.id; });
+    if (idx >= 0) arr[idx] = post; else arr.unshift(post);
+    window.BLOG_POSTS = arr;
+    try {
+      var drafts = JSON.parse(localStorage.getItem('qingyu.drafts') || '[]');
+      if (Array.isArray(drafts)) {
+        drafts = drafts.filter(function (p) { return p && p.id !== post.id; });
+        localStorage.setItem('qingyu.drafts', JSON.stringify(drafts));
+      }
+    } catch (e) {}
+  }
+
+  function removeMemoryPost(id) {
+    var arr = Array.isArray(window.BLOG_POSTS) ? window.BLOG_POSTS : [];
+    window.BLOG_POSTS = arr.filter(function (p) { return p && p.id !== id; });
+    try {
+      var drafts = JSON.parse(localStorage.getItem('qingyu.drafts') || '[]');
+      if (Array.isArray(drafts)) {
+        drafts = drafts.filter(function (p) { return p && p.id !== id; });
+        localStorage.setItem('qingyu.drafts', JSON.stringify(drafts));
+      }
+    } catch (e) {}
+  }
+
   async function listPosts() {
     if (cloudOn()) {
       var d = await api('api/posts');
       return (d && d.posts) || [];
     }
-    // 静态模式：BLOG_POSTS 合并本地草稿
+
+    if (await localWritable()) {
+      var ld = await localApi('/local-api/posts');
+      return (ld && ld.posts) || [];
+    }
+
     var base = (window.getStaticPosts ? window.getStaticPosts() : []) || [];
     var drafts = [];
     try { drafts = JSON.parse(localStorage.getItem('qingyu.drafts') || '[]'); } catch (e) {}
@@ -94,14 +158,26 @@
     drafts.forEach(function (p) { if (p && p.id) map[p.id] = p; });
     return Object.keys(map).map(function (k) { return map[k]; });
   }
+
   async function getPost(id) {
     if (cloudOn()) {
       try { var d = await api('api/posts/' + encodeURIComponent(id)); return d && d.post; } catch (e) { return null; }
     }
+
+    if (await localWritable()) {
+      try {
+        var ld = await localApi('/local-api/posts/' + encodeURIComponent(id));
+        return ld && ld.post;
+      } catch (e) {
+        return null;
+      }
+    }
+
     var all = await listPosts();
     for (var i = 0; i < all.length; i++) if (all[i].id === id) return all[i];
     return null;
   }
+
   function saveStaticPost(post) {
     var drafts = [];
     try { drafts = JSON.parse(localStorage.getItem('qingyu.drafts') || '[]'); } catch (e) {}
@@ -113,23 +189,43 @@
     if (idx >= 0) drafts[idx] = item; else drafts.push(item);
     localStorage.setItem('qingyu.drafts', JSON.stringify(drafts));
   }
+
   async function savePost(post, isNew) {
     if (cloudOn()) {
       if (isNew) return await api('api/posts', { method: 'POST', body: JSON.stringify(post) });
       return await api('api/posts/' + encodeURIComponent(post.id), { method: 'PUT', body: JSON.stringify(post) });
     }
+
+    if (await localWritable()) {
+      var url = isNew ? '/local-api/posts' : '/local-api/posts/' + encodeURIComponent(post.id);
+      var r = await localApi(url, {
+        method: isNew ? 'POST' : 'PUT',
+        body: JSON.stringify(post)
+      });
+      syncMemoryPost((r && r.post) || post);
+      return r;
+    }
+
     saveStaticPost(post);
     return { ok: true };
   }
+
   async function deletePost(id) {
     if (cloudOn()) return await api('api/posts/' + encodeURIComponent(id), { method: 'DELETE' });
-    // 静态：从 BLOG_POSTS 与草稿中移除
+
+    if (await localWritable()) {
+      var r = await localApi('/local-api/posts/' + encodeURIComponent(id), { method: 'DELETE' });
+      removeMemoryPost(id);
+      return r;
+    }
+
     var drafts = [];
     try { drafts = JSON.parse(localStorage.getItem('qingyu.drafts') || '[]'); } catch (e) {}
     drafts = drafts.filter(function (p) { return p.id !== id; });
     localStorage.setItem('qingyu.drafts', JSON.stringify(drafts));
     return { ok: true };
   }
+
   function downloadPostsJs() {
     if (!window.buildPostsJs) { toast(t('admin.toast.exportNotSupported'), 'err'); return; }
     // posts.js
@@ -677,10 +773,8 @@
         var post = await getPost(pid);
         if (!post) { toast(t('admin.postList.notFound'), 'err'); return; }
         post.pinned = !post.pinned;
-        if (cloudOn()) {
-          await api('api/posts/' + enc(pid), { method: 'PUT', body: JSON.stringify(post) });
-        } else {
-          saveStaticPost(post);
+        var pinResult = await savePost(post, false);
+        if (!cloudOn() && !(pinResult && pinResult.localFile)) {
           downloadPostsJs();
         }
         toast(post.pinned ? t('admin.postList.pinnedOk') : t('admin.postList.unpinnedOk'), 'ok');
@@ -747,11 +841,152 @@
     if (route.id) loadEditor(content, route.id); else updatePreview(content);
   }
 
+
+  /* ----------------------- 本地图片粘贴 / 拖拽上传 ----------------------- */
+  function readImageAsDataURL(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = function () { reject(new Error('读取图片失败')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function imageAltName(file) {
+    var name = (file && file.name) ? file.name : 'image';
+    name = name.replace(/\.[^.]+$/, '').replace(/[\[\]\(\)]/g, '').trim();
+    return name || 'image';
+  }
+
+  function insertTextAtCursor(area, text) {
+    var start = typeof area.selectionStart === 'number' ? area.selectionStart : area.value.length;
+    var end = typeof area.selectionEnd === 'number' ? area.selectionEnd : start;
+    var before = area.value.slice(0, start);
+    var after = area.value.slice(end);
+    var prefix = before && !/\n$/.test(before) ? '\n' : '';
+    var suffix = after && !/^\n/.test(after) ? '\n' : '';
+    var inserted = prefix + text + suffix;
+    area.value = before + inserted + after;
+    var pos = before.length + inserted.length;
+    area.selectionStart = area.selectionEnd = pos;
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    area.focus();
+  }
+
+  async function uploadEditorImage(file) {
+    if (!file || !/^image\/(png|jpeg|gif|webp|avif)$/i.test(file.type || '')) {
+      throw new Error('只支持 PNG / JPEG / GIF / WebP / AVIF 图片');
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      throw new Error('单张图片不能超过 8 MB');
+    }
+    if (!(await localWritable())) {
+      throw new Error('图片直传需要使用 python serve.py 本地可写模式');
+    }
+
+    var dataUrl = await readImageAsDataURL(file);
+    var result = await localApi('/local-api/images', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: file.name || 'image',
+        type: file.type,
+        dataUrl: dataUrl
+      })
+    });
+    if (!result || !result.url) throw new Error('服务器没有返回图片地址');
+    return result;
+  }
+
+  async function insertEditorImages(content, area, files) {
+    var images = Array.prototype.slice.call(files || []).filter(function (f) {
+      return f && /^image\//i.test(f.type || '');
+    });
+    if (!images.length) return;
+
+    for (var i = 0; i < images.length; i++) {
+      var file = images[i];
+      try {
+        toast('正在保存图片 ' + (i + 1) + '/' + images.length + ' …');
+        var result = await uploadEditorImage(file);
+        insertTextAtCursor(area, '![' + imageAltName(file) + '](' + result.url + ')');
+        toast('图片已保存到 public/images/', 'ok');
+      } catch (e) {
+        toast('图片上传失败：' + (e.message || e), 'err');
+      }
+    }
+    updatePreview(content);
+  }
+
+  function chooseEditorImages(content, area) {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/avif';
+    input.multiple = true;
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', function () {
+      insertEditorImages(content, area, input.files).finally(function () { input.remove(); });
+    });
+    input.click();
+  }
+
+  function bindEditorImagePaste(content, area) {
+    area.addEventListener('paste', function (e) {
+      var cd = e.clipboardData;
+      if (!cd || !cd.items) return;
+      var files = [];
+      for (var i = 0; i < cd.items.length; i++) {
+        var item = cd.items[i];
+        if (item.kind === 'file' && /^image\//i.test(item.type || '')) {
+          var file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (!files.length) return;
+      e.preventDefault();
+      insertEditorImages(content, area, files);
+    });
+
+    area.addEventListener('dragover', function (e) {
+      var dt = e.dataTransfer;
+      if (!dt || !dt.types || Array.prototype.indexOf.call(dt.types, 'Files') < 0) return;
+      e.preventDefault();
+    });
+
+    area.addEventListener('drop', function (e) {
+      var dt = e.dataTransfer;
+      if (!dt || !dt.files || !dt.files.length) return;
+      var files = Array.prototype.slice.call(dt.files).filter(function (f) {
+        return /^image\//i.test(f.type || '');
+      });
+      if (!files.length) return;
+      e.preventDefault();
+      insertEditorImages(content, area, files);
+    });
+  }
+
   function bindEditor(content, route) {
     var area = content.querySelector('#abBody');
     area.addEventListener('input', debounce(function () { updatePreview(content); }, 200));
+    bindEditorImagePaste(content, area);
     content.querySelector('#abToolbar').querySelectorAll('[data-md]').forEach(function (b) {
-      b.addEventListener('click', function () { insertMd(area, b.getAttribute('data-md')); updatePreview(content); area.focus(); });
+      b.addEventListener('click', function () {
+        var type = b.getAttribute('data-md');
+        if (type === 'img') {
+          localWritable().then(function (writable) {
+            if (writable) chooseEditorImages(content, area);
+            else {
+              insertMd(area, type);
+              updatePreview(content);
+              area.focus();
+            }
+          });
+          return;
+        }
+        insertMd(area, type);
+        updatePreview(content);
+        area.focus();
+      });
     });
     content.querySelector('#abSaveDraft').addEventListener('click', function () { saveEditor(content, route, 'draft'); });
     content.querySelector('#abPublish').addEventListener('click', function () { saveEditor(content, route, 'published'); });
@@ -825,7 +1060,9 @@
       var r = await savePost(post, isNew);
       if (r && (r.ok || r.post)) {
         toast(status === 'published' ? t('admin.editor.saved') : t('admin.editor.savedDraft'), 'ok');
-        if (cloudOn()) go('/admin/posts'); else {
+        if (cloudOn() || (r && r.localFile)) {
+          go('/admin/posts');
+        } else {
           toast(t('admin.editor.savedLocal'), 'ok');
         }
       } else {
